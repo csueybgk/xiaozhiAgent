@@ -26,6 +26,19 @@ public class CorpusAlignmentTest {
     }
 
     @Test
+    public void listIndexes() throws Exception {
+        Class.forName("org.postgresql.Driver");
+        try (Connection c = DriverManager.getConnection(URL, "postgres", "123456");
+             Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery("SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'medical_documents'")) {
+            while (rs.next()) {
+                System.out.println("索引: " + rs.getString("indexname"));
+                System.out.println("定义: " + rs.getString("indexdef"));
+            }
+        }
+    }
+
+    @Test
     public void run() throws Exception {
         Class.forName("org.postgresql.Driver");
 
