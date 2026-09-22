@@ -8,6 +8,7 @@ import dev.langchain4j.rag.content.aggregator.ReciprocalRankFuser;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.query.Query;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -49,6 +50,19 @@ public class HybridContentRetriever implements ContentRetriever {
     private static final int KEYWORD_RESULTS = 20;  // 关键词粗召回条数
     private static final int RERANK_RESULTS = 5;    // 精排后返回条数
 
+    /**
+     * ReRank 分数阈值：低于此分的候选一律丢弃；若全部候选都不达标，则返回空列表，
+     * 由 {@link GuardedContentInjector} 注入「知识库无相关资料、必须如实说不知道」的指令。
+     *
+     * <p>取值依据（实测，见 RerankThresholdTest）：域内问题的 top1 分数下界为 0.85，
+     * 域外问题（知识库完全不覆盖）的 top1 分数上界为 0.014，两者间有两个数量级的空白。
+     * 0.1 位于该间隙的对数中点，距噪声上界约 7 倍、距信号下界约 8.5 倍，两侧余量对称。</p>
+     */
+    private static final double DEFAULT_RERANK_THRESHOLD = 0.1;
+
+    @Value("${xiaozhi.rag.rerank-threshold:" + DEFAULT_RERANK_THRESHOLD + "}")
+    private double rerankThreshold;
+
     // 查询改写器对非医疗问题（问候、身份、闲聊等）输出的标记，遇到则跳过检索
     private static final String NO_RETRIEVAL = "【无需检索】";
 
@@ -83,24 +97,29 @@ public class HybridContentRetriever implements ContentRetriever {
     }
 
     private List<Content> reRank(String queryText, List<Content> candidates) {
-        if (candidates.size() <= RERANK_RESULTS) {
-            return candidates;
+        if (candidates.isEmpty()) {
+            return List.of();
         }
+        // 注意：这里不能因为「候选数已 ≤ RERANK_RESULTS 就跳过打分」而短路。
+        // 一旦跳过就没有分数，阈值便无从施加 —— 候选少恰恰更需要判相关性。
         try {
             List<TextSegment> segments = candidates.stream()
                     .map(Content::textSegment)
                     .collect(Collectors.toList());
             List<Double> scores = scoringModel.scoreAll(segments, queryText).content();
 
-            // 按得分降序取前 RERANK_RESULTS，保留原 Content 对象（含 embedding_id 等 metadata）
+            // 先按阈值过滤，再按得分降序取前 RERANK_RESULTS，保留原 Content 对象（含 embedding_id 等 metadata）。
+            // 全部低于阈值 → 返回空列表 → 注入器走「说不知道」分支。
             return IntStream.range(0, candidates.size())
+                    .filter(i -> scores.get(i) >= rerankThreshold)
                     .boxed()
                     .sorted(Comparator.comparingDouble((Integer i) -> scores.get(i)).reversed())
                     .limit(RERANK_RESULTS)
                     .map(candidates::get)
                     .collect(Collectors.toList());
         } catch (Exception e) {
-            // 精排失败兜底：退回粗召回顺序，不影响主流程
+            // 精排失败兜底：此时拿不到任何分数，无法判断相关性，只能退回粗召回顺序。
+            // 代价是这条路径上阈值失效；属于「接口抖动」与「因故障全部拒答」之间的取舍。
             return candidates.subList(0, Math.min(candidates.size(), RERANK_RESULTS));
         }
     }

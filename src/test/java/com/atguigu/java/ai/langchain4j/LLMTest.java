@@ -75,10 +75,6 @@ public class LLMTest {
         //    会挤占 top-K 召回名额，必须先清掉再重灌
         new JdbcTemplate(pgVectorDataSource).update("DELETE FROM medical_documents");
 
-        // 2. 混合格式知识库：同一份知识可以是不同文件格式。
-        //    这里刻意演示 3 种格式同灌：md（纯文本）、pdf（PDFBox）、docx（Word，Tika 解析）。
-        //    注意：LangChain4j 单参 loadDocument(path) 的默认解析器由 classpath 上的 SPI 工厂决定，
-        //    并不会按扩展名自动识别，所以这里必须显式传入 parser（见 parserFor）。
         // 2. 规范语料 = 3 个 .md：评估集（rag-eval.json）就是按这份语料标定的，
         //    混合检索 Recall@1 = 1.000 依赖它的分块布局。
         //    实测教训：若把某份知识换成同名 .pdf/.docx，多格式能正常解析入库，但 pdf 常是
