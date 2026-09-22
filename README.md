@@ -76,6 +76,7 @@ flowchart LR
 | 向量库 | PostgreSQL + pgvector（`medical_documents` 表） |
 | 记忆存储 | MongoDB（消息序列化持久化） |
 | 接口文档 | Knife4j（OpenAPI 3） |
+| 前端 | Vue 3 · Vite 5 · Element Plus（`frontend/` 目录） |
 | 测试 | JUnit 5 · Spring Boot Test |
 
 ---
@@ -350,6 +351,33 @@ src/test/java/
 
 > 测试代码分布在 `com.hxm.*` 与 `com.atguigu.*` 两个包下（历史原因：灌库入口沿用教程包名），并非重复代码。
 
+### 前端（`frontend/`）
+
+Vue 3 + Vite + Element Plus 实现的问诊界面：会话列表（新建 / 重命名 / 删除）、消息气泡、流式增量渲染。
+
+```
+frontend/
+├── index.html
+├── vite.config.js              # /api 代理到 http://localhost:8080
+└── src/
+    ├── main.js
+    ├── App.vue
+    └── components/
+        └── ChatWindow.vue      # 全部界面逻辑（侧边栏 + 消息列表 + 输入框）
+```
+
+启动：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+> 需先启动后端（`mvn spring-boot:run`，默认 8080），前端所有请求走 `/api` 前缀，由 [vite.config.js](frontend/vite.config.js) 转发并去掉前缀。
+
+**前后端的流式配合**：后端返回 `text/stream;charset=utf-8`（**不是标准 `text/event-stream`**），前端因此不能用 `EventSource`，而是用 `axios` 的 `responseType: 'stream'` + `onDownloadProgress` 累积读取 `responseText` 并做增量 diff 渲染。两端是配套的 —— 改后端 `Content-Type` 会直接打断前端。
+
 ---
 
 ## 已知限制
@@ -373,6 +401,7 @@ src/test/java/
 - **同一 memoryId 并发写会丢消息**：`MongoChatMemoryStore.updateMessages` 是整篇文档覆盖（序列化全量消息后 `upsert`），同一会话并发两条请求时后写会覆盖先写。
 - **流式接口无错误处理**：`Flux` 链路没有 `onErrorResume`，下游模型 / 检索异常会直接中断响应，客户端拿到半截内容且无提示。
 - **输入无校验**：`ChatForm.message` 未做非空 / 长度限制，可被超长输入打爆上下文与 API 计费。
+- **前端用 `v-html` 渲染模型输出**：[ChatWindow.vue](frontend/src/components/ChatWindow.vue) 里消息内容是 `v-html` 注入的。模型输出若包含 HTML 会被当标签渲染，配合「输入无校验 + 知识库文档可控」，存在 XSS 风险。应改为纯文本渲染，或接入 DOMPurify 之类做白名单过滤。
 - **PG 配置硬编码**：连接信息写死在 Java 类里，换环境必须改代码。
 - **知识文档路径硬编码**：灌库测试指向本地绝对路径，仓库外部署需调整。
 - **预约表缺脚本**：`appointment` 建表 DDL 只在 README 中，未落到 `src/main/resources/sql/`。
