@@ -129,6 +129,12 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>${spring-boot.version}</version>
+                <configuration>
+                    <!-- 强制子 JVM 使用 UTF-8：JDK 17 + 中文 Windows 下 file.encoding 默认为 GBK，
+                         LangChain4j 的 SSE 解析器会因此把模型返回的 UTF-8 流按 GBK 解码，
+                         导致回答乱码并写入 MongoDB。详见 application.properties 顶部说明。 -->
+                    <jvmArguments>-Dfile.encoding=UTF-8</jvmArguments>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

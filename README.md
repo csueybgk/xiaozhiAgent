@@ -168,13 +168,27 @@ flowchart LR
 
 | 依赖 | 说明 |
 |---|---|
-| JDK 17+ | 已在 21 上测试；需确保 `JAVA_HOME` 指向 JDK 17+，`mvn` 走的是同一个 JDK |
+| JDK 17+ | 已在 21 上测试；需确保 `JAVA_HOME` 指向 JDK 17+，`mvn` 走的是同一个 JDK。**JDK 17 还要求 `file.encoding=UTF-8`**，否则会把模型回答解码成乱码（见下方「编码陷阱」）；JDK 18+ 已默认 UTF-8，无此问题 |
 | Maven 3.6+ | |
 | MySQL 8 | 业务库 `guiguxiaozhi`，连接串见 `application.properties` |
 | PostgreSQL 16 + `pgvector` 扩展 | 向量库 `rag_db`，**连接信息硬编码在 `EmbeddingStoreConfig.java`，与下方示例不一致时必须先改配置** |
 | MongoDB | 本地 `localhost:27017`，库 `chat_memory_db` |
 | DeepSeek API Key | `DEEPSEEK_API_KEY` |
 | 硅基流动 API Key | `EMBEDDING_API_KEY`（embedding + rerank 共用） |
+
+> ⚠️ **编码陷阱（会让历史记录永久乱码）**
+>
+> LangChain4j 1.0.0-rc1 的 `DefaultServerSentEventParser` 内部是
+> `new InputStreamReader(InputStream)` —— **没传编码**，于是用 JVM 默认的 `file.encoding`。
+> 中文 Windows + JDK 17 下 `file.encoding=GBK`，DeepSeek 返回的 UTF-8 流会被按 GBK 解码，
+> 回答变成乱码（含 U+FFFD）并**写入 MongoDB**，事后无法完整还原。
+>
+> 本项目已加两道保险：
+> 1. `pom.xml` 给 `spring-boot:run` 固定 `-Dfile.encoding=UTF-8`；
+> 2. `spring.mandatory-file-encoding=UTF-8` 让直接 `java -jar` 启动时若编码不对就**直接失败**。
+>
+> 若你用 IDEA 启动，仍需自行确认 VM options 里有 `-Dfile.encoding=UTF-8`
+> （IDEA 通常会自动加）。**换用 JDK 18+ 可从根本上规避**（JEP 400 默认 UTF-8）。
 
 ### 1. 配置环境变量
 
@@ -287,6 +301,7 @@ mvn spring-boot:run
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
 | `server.port` | `8080` | |
+| `spring.mandatory-file-encoding` | `UTF-8` | 启动时校验 `file.encoding`，不是 UTF-8 直接失败，避免静默把回答解码成乱码 |
 | `xiaozhi.rag.rerank-threshold` | `0.1` | ReRank 分数阈值，低于此分的检索结果一律丢弃；全部不达标则走「说不知道」。取值依据见上文 |
 | `spring.datasource.url` | `jdbc:mysql://localhost:3306/guiguxiaozhi?...` | 需带 `allowPublicKeyRetrieval=true`（MySQL 8 认证要求） |
 | `spring.data.mongodb.uri` | `mongodb://localhost:27017/chat_memory_db` | |
